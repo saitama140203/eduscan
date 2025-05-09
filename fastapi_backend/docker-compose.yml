@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eduscan_api
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=development
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=eduscan
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/eduscan
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - eduscan-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: eduscan_db
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=eduscan
+    ports:
+      - "5432:5432"
+    networks:
+      - eduscan-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: eduscan_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - eduscan-network
+  
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eduscan_celery
+    restart: always
+    command: celery -A app.tasks.worker worker --loglevel=info
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=development
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=eduscan
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/eduscan
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - eduscan-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: eduscan_pgadmin
+    restart: always
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@eduscan.vn
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - eduscan-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+
+networks:
+  eduscan-network:
+    driver: bridge 

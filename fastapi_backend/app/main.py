@@ -1,51 +1,103 @@
-from fastapi import FastAPI
-from .schemas import UserCreate, UserRead, UserUpdate
-from .users import auth_backend, fastapi_users, AUTH_URL_PATH
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from .utils import simple_generate_unique_route_id
-from app.routes.items import router as items_router
-from app.config import settings
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException
 
+from app.api.errors.http_errors import (
+    http_error_handler,
+    validation_exception_handler,
+)
+from app.api.v1.router import router as api_v1_router
+from app.core.config import settings
+from app.core.events import register_app_events
+from app.core.logging import setup_logging
+ 
+
+# Khởi tạo logging
+logger = setup_logging()
+
+
+# Tạo ứng dụng FastAPI với các cấu hình từ settings
 app = FastAPI(
-    generate_unique_id_function=simple_generate_unique_route_id,
-    openapi_url=settings.OPENAPI_URL,
+    title=settings.PROJECT_NAME,
+    description=settings.DESCRIPTION,
+    version=settings.VERSION,
+    openapi_url=f"{settings.API_V1_STR}{settings.OPENAPI_URL}",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-# Middleware for CORS configuration
+
+# Đăng ký các event handlers (startup, shutdown)
+register_app_events(app)
+
+
+# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=[str(origin) for origin in settings.CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include authentication and user management routes
-app.include_router(
-    fastapi_users.get_auth_router(auth_backend),
-    prefix=f"/{AUTH_URL_PATH}/jwt",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),
-    prefix=f"/{AUTH_URL_PATH}",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_reset_password_router(),
-    prefix=f"/{AUTH_URL_PATH}",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_verify_router(UserRead),
-    prefix=f"/{AUTH_URL_PATH}",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
-)
 
-# Include items routes
-app.include_router(items_router, prefix="/items")
+# Đăng ký các exception handlers
+app.add_exception_handler(HTTPException, http_error_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+
+
+# Đăng ký router cho API v1
+app.include_router(api_v1_router, prefix=settings.API_V1_STR)
+
+
+# Root endpoint
+@app.get("/", tags=["health"])
+async def root():
+    """
+    Kiểm tra trạng thái hoạt động của API
+    """
+    return {
+        "status": "online",
+        "app_name": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "environment": settings.ENV,
+    }
+
+
+# Endpoint kiểm tra health
+@app.get("/health", tags=["health"])
+async def health_check():
+    """
+    Kiểm tra sức khỏe của hệ thống
+    """
+    return {
+        "status": "healthy",
+        "app_name": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+    }
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """
+    Middleware ghi log cho mỗi request
+    """
+    # Log thông tin request
+    logger.info(f"Request: {request.method} {request.url.path}")
+    
+    # Xử lý request
+    response = await call_next(request)
+    
+    # Log thông tin response
+    logger.info(f"Response: {request.method} {request.url.path} - Status: {response.status_code}")
+    
+    return response
+
+
+# Thêm thông tin cho OpenAPI
+if settings.ENV != "production":
+    # Chỉ hiển thị thông tin này trong môi trường không phải production
+    from app.api.openapi import custom_openapi
+    app.openapi = custom_openapi(app)

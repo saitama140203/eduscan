@@ -1,0 +1,13 @@
+-r base.txt
+
+# Performance
+gunicorn>=20.1.0,<20.2.0
+uvloop>=0.17.0,<0.18.0; sys_platform != "win32" and implementation_name != "pypy"
+httptools>=0.5.0,<0.6.0
+
+# Monitoring
+sentry-sdk>=1.19.1,<1.20.0
+
+# Optimizations
+orjson>=3.8.1,<3.9.0
+ujson>=5.7.0,<5.8.0 

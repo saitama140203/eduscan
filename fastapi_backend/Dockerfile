@@ -1,33 +1,41 @@
-FROM python:3.12-bookworm
+FROM python:3.11-slim
 
-# Set the working directory
 WORKDIR /app
 
-# The uv installer requires curl (and certificates) to download the release archive
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+# Cài đặt các dependencies của hệ thống
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Download the latest uv installer
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
+# Cài đặt Python dependencies
+COPY requirements /app/requirements/
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements/prod.txt
 
-# Run the uv installer then remove it
-RUN sh /uv-installer.sh && rm /uv-installer.sh
+# Thiết lập biến môi trường
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Ho_Chi_Minh
 
-# Ensure the installed binary is on the `PATH`
-ENV PATH="/root/.local/bin/:$PATH"
+# Copy source code
+COPY . /app/
 
-# Copy dependency files first to leverage Docker caching
-COPY pyproject.toml uv.lock ./
+# Tạo thư mục chứa logs và uploads
+RUN mkdir -p /app/logs /app/uploads \
+    && chmod -R 755 /app/logs /app/uploads
 
-# Install dependencies using uv
-RUN uv sync --frozen
+# Kiểm tra lỗi với alembic và tạo database migrations nếu cần
+RUN alembic check && echo "Alembic configuration is valid"
 
-ENV PATH="/app/.venv/bin:$PATH"
+# Script khởi động
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
-# Copy the rest of the application code
-COPY . .
-
-# Expose the application port
+# Expose port
 EXPOSE 8000
 
-# Command to run the application
-CMD ["./start.sh"]
+# Khởi động server với script khi container chạy
+CMD ["/app/start.sh"]
